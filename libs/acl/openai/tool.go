@@ -27,5 +27,5 @@ type tool struct {
 type functionDefinition struct {
 	Name        string             `json:"name"`
 	Description string             `json:"description,omitempty"`
-	Parameters  *jsonschema.Schema `json:"parameters"`
+	Parameters  *jsonschema.Schema `json:"parameters,omitempty"`
 }
