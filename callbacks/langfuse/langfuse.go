@@ -28,6 +28,7 @@ import (
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -184,6 +185,19 @@ type langfuseStateKey struct{}
 type langfuseState struct {
 	traceID       string
 	observationID string
+	traceBody     *langfuse.TraceEventBody
+}
+
+func (l *langfuseState) updateTraceInput(in string) {
+	if l.traceBody != nil {
+		l.traceBody.Input = in
+	}
+}
+
+func (l *langfuseState) updateTraceOutput(out string) {
+	if l.traceBody != nil {
+		l.traceBody.Output = out
+	}
 }
 
 func (c *CallbackHandler) OnStart(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
@@ -222,6 +236,7 @@ func (c *CallbackHandler) OnStart(ctx context.Context, info *callbacks.RunInfo, 
 		return context.WithValue(ctx, langfuseStateKey{}, &langfuseState{
 			traceID:       state.traceID,
 			observationID: generationID,
+			traceBody:     state.traceBody,
 		})
 	}
 
@@ -229,6 +244,14 @@ func (c *CallbackHandler) OnStart(ctx context.Context, info *callbacks.RunInfo, 
 	if err != nil {
 		log.Printf("marshal input error: %v, runinfo: %+v", err, info)
 		return ctx
+	}
+	if isRoot(info.Component) {
+		// Explicitly set the input of the trace
+		state.updateTraceInput(in)
+
+		if err := c.updateCurrentTrace(state); err != nil {
+			log.Printf("update trace error: %v, runinfo: %+v", err, info)
+		}
 	}
 	spanID, err := c.cli.CreateSpan(&langfuse.SpanEventBody{
 		BaseObservationEventBody: langfuse.BaseObservationEventBody{
@@ -248,6 +271,7 @@ func (c *CallbackHandler) OnStart(ctx context.Context, info *callbacks.RunInfo, 
 	return context.WithValue(ctx, langfuseStateKey{}, &langfuseState{
 		traceID:       state.traceID,
 		observationID: spanID,
+		traceBody:     state.traceBody,
 	})
 }
 
@@ -294,6 +318,13 @@ func (c *CallbackHandler) OnEnd(ctx context.Context, info *callbacks.RunInfo, ou
 	if err != nil {
 		log.Printf("marshal output error: %v, runinfo: %+v", err, info)
 		return ctx
+	}
+	if isRoot(info.Component) {
+		state.updateTraceOutput(out)
+		// Explicitly set the output of the trace.
+		if err := c.updateCurrentTrace(state); err != nil {
+			log.Printf("update trace error: %v, runinfo: %+v", err, info)
+		}
 	}
 	err = c.cli.EndSpan(&langfuse.SpanEventBody{
 		BaseObservationEventBody: langfuse.BaseObservationEventBody{
@@ -429,6 +460,7 @@ func (c *CallbackHandler) OnStartWithStreamInput(ctx context.Context, info *call
 		return context.WithValue(ctx, langfuseStateKey{}, &langfuseState{
 			traceID:       state.traceID,
 			observationID: generationID,
+			traceBody:     state.traceBody,
 		})
 	}
 
@@ -484,11 +516,18 @@ func (c *CallbackHandler) OnStartWithStreamInput(ctx context.Context, info *call
 		if err != nil {
 			log.Printf("update stream span error: %v", err)
 		}
+		if isRoot(info.Component) {
+			state.updateTraceInput(in)
+			if err = c.updateCurrentTrace(state); err != nil {
+				log.Printf("update trace error: %v", err)
+			}
+		}
 	}()
 
 	return context.WithValue(ctx, langfuseStateKey{}, &langfuseState{
 		traceID:       state.traceID,
 		observationID: spanID,
+		traceBody:     state.traceBody,
 	})
 }
 
@@ -589,6 +628,13 @@ func (c *CallbackHandler) OnEndWithStreamOutput(ctx context.Context, info *callb
 		if err != nil {
 			log.Printf("end stream span fail: %v, runinfo: %+v", err, info)
 		}
+		if isRoot(info.Component) {
+			state.updateTraceOutput(out)
+
+			if err = c.updateCurrentTrace(state); err != nil {
+				log.Printf("update trace error: %v", err)
+			}
+		}
 	}()
 
 	return ctx
@@ -629,9 +675,23 @@ func (c *CallbackHandler) getOrInitState(ctx context.Context, curName string) (c
 	return context.WithValue(ctx, langfuseStateKey{}, nState), nState
 }
 
+// There is no event type named "trace-update", and the only way to update a trace
+// is to fire an event of type "trace-create" again with the same body id,
+// while using a separate event id, which will be filled by CreateTrace.
+//
+// See https://api.reference.langfuse.com/#tag/ingestion/POST/api/public/ingestion
+func (c *CallbackHandler) updateCurrentTrace(state *langfuseState) error {
+	_, err := c.cli.CreateTrace(state.traceBody)
+	return err
+}
+
 func getName(info *callbacks.RunInfo) string {
 	if len(info.Name) != 0 {
 		return info.Name
 	}
 	return info.Type + string(info.Component)
+}
+
+func isRoot(cmp components.Component) bool {
+	return cmp == compose.ComponentOfGraph || cmp == compose.ComponentOfChain
 }
