@@ -101,7 +101,7 @@ type traceOptions struct {
 }
 
 func initState(_ context.Context, cli langfuse.Langfuse, options *traceOptions) (*langfuseState, error) {
-	traceID, err := cli.CreateTrace(&langfuse.TraceEventBody{
+	traceEventBody := &langfuse.TraceEventBody{
 		BaseEventBody: langfuse.BaseEventBody{
 			ID:          options.ID,
 			Name:        options.Name,
@@ -115,12 +115,14 @@ func initState(_ context.Context, cli langfuse.Langfuse, options *traceOptions) 
 		Release:   options.Release,
 		Tags:      options.Tags,
 		Public:    options.Public,
-	})
+	}
+	traceID, err := cli.CreateTrace(traceEventBody)
 	if err != nil {
 		return nil, fmt.Errorf("create trace error: %v", err)
 	}
 	s := &langfuseState{
-		traceID: traceID,
+		traceID:   traceID,
+		traceBody: traceEventBody,
 	}
 	return s, nil
 }

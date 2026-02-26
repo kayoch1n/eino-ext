@@ -86,6 +86,7 @@ func TestLangfuseCallback(t *testing.T) {
 
 	mockey.PatchConvey("test span", t, func() {
 		mockLangfuse.EXPECT().CreateTrace(gomock.Any()).Return("trace id", nil).Times(2)
+		mockLangfuse.EXPECT().UpdateTrace(gomock.Any()).Return(nil).Times(2)
 		createSpanTimes := 0
 		mockLangfuse.EXPECT().CreateSpan(gomock.Any()).DoAndReturn(func(body *langfuse.SpanEventBody) (string, error) {
 			defer func() {
@@ -157,6 +158,7 @@ func TestLangfuseCallback(t *testing.T) {
 
 	mockey.PatchConvey("test span stream", t, func() {
 		mockLangfuse.EXPECT().CreateTrace(gomock.Any()).Return("trace id", nil).Times(1)
+		mockLangfuse.EXPECT().UpdateTrace(gomock.Any()).Return(nil).AnyTimes()
 		mockLangfuse.EXPECT().CreateSpan(gomock.Any()).DoAndReturn(func(body *langfuse.SpanEventBody) (string, error) {
 			return "", nil
 		}).AnyTimes()
